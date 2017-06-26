@@ -58,6 +58,8 @@ public class LeaderElection extends BaseConfiguration {
 
     {
         client.start();
+        client.getCuratorListenable().addListener(listener);
+        client.getConnectionStateListenable().addListener(connectionStateListener);
         init();
     }
 
@@ -67,8 +69,6 @@ public class LeaderElection extends BaseConfiguration {
                     .create()
                     .withMode(CreateMode.EPHEMERAL_SEQUENTIAL)
                     .forPath(zNodeNamePrefix).substring(1);
-            client.getCuratorListenable().addListener(listener);
-            client.getConnectionStateListenable().addListener(connectionStateListener);
         } catch (Exception ex) {
             throw new RuntimeException(ex.getMessage());
         }
