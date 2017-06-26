@@ -63,6 +63,7 @@ public class ReadWriteLock extends BaseConfiguration {
     {
         client.start();
         client.getCuratorListenable().addListener(curatorListener);
+        client.getConnectionStateListenable().addListener(connectionStateListener);
     }
 
     public ReadWriteLock() {
