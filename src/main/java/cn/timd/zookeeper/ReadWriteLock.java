@@ -10,7 +10,11 @@ import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.data.Stat;
 
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class ReadWriteLock extends BaseConfiguration {
     private String namespace;
@@ -21,30 +25,33 @@ public class ReadWriteLock extends BaseConfiguration {
 
     private final ConnectionStateListener connectionStateListener = new ConnectionStateListener() {
         public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
-            System.out.println(connectionState);
             switch (connectionState) {
                 case SUSPENDED:
                 case LOST:
                     synchronized (condition) {
+                        System.out.println(connectionState);
                         condition.notifyAll();
                     }
                     break;
                 case RECONNECTED:
-                    try {
-                        if (nodeName != null)
+                    synchronized (condition) {
+                        System.out.println(connectionState);
+                        if (nodeName == null)
+                            break;
+                        try {
                             client.usingNamespace(namespace).delete().forPath(nodeName);
-                    } catch (Exception ex) {
-                        ex.printStackTrace();
-                    }
-
-                    try {
-                        nodeName = createNode();
-                        synchronized (condition) {
-                            condition.notifyAll();
+                        } catch (Exception ex) {
+                            ex.printStackTrace();
                         }
-                    } catch (Exception ex) {
-                        ex.printStackTrace();
+
+                        try {
+                            nodeName = createNode();
+                            condition.notifyAll();
+                        } catch (Exception ex) {
+                            ex.printStackTrace();
+                        }
                     }
+                    break;
             }
         }
     };
@@ -123,27 +130,33 @@ public class ReadWriteLock extends BaseConfiguration {
     private boolean acquireLock(String nodeName, byte magic) throws Exception {
         this.magic = magic;
         if (nodeName == null)
-            this.nodeName = nodeName = createNode();
+            this.nodeName = createNode();
 
         boolean result;
         while (!(result = isAcquired())) {
-            synchronized (condition) {
-                condition.wait();
-            }
+            condition.wait();
         }
         return result;
     }
 
     public boolean acquireReadLock() throws Exception {
-        return acquireLock(null, (byte)0);
+        if (nodeName != null && magic != null)
+            throw new RuntimeException("illegal state");
+        synchronized (condition) {
+            return acquireLock(null, (byte) 0);
+        }
     }
 
     public boolean acquireWriteLock() throws Exception {
-        return acquireLock(null, (byte)1);
+        if (nodeName != null && magic != null)
+            throw new RuntimeException("illegal state");
+        synchronized (condition) {
+            return acquireLock(null, (byte) 1);
+        }
     }
 
     public void releaseLock() throws Exception {
-        if (nodeName != null) {
+        if (nodeName != null && magic != null) {
             client.usingNamespace(namespace).delete().forPath(nodeName);
             nodeName = null;
             magic = null;
@@ -151,12 +164,49 @@ public class ReadWriteLock extends BaseConfiguration {
     }
 
     public static void main(String[] args) throws Exception {
-        ReadWriteLock lock = new ReadWriteLock();
-        lock.acquireWriteLock();
-        System.out.println("acquire lock");
-        lock.acquireWriteLock();
-        System.out.println("acquire lock");
-        lock.releaseLock();
+        ExecutorService service = Executors.newFixedThreadPool(10);
+
+        Runnable readRunnable = new Runnable() {
+            public void run() {
+                try {
+                    ReadWriteLock readWriteLock = new ReadWriteLock();
+                    String threadName = Thread.currentThread().getName();
+                    System.out.println(String.format(threadName + " begins to acquire read lock @%tr", new Date()));
+                    readWriteLock.acquireReadLock();
+                    System.out.println(String.format(threadName + " acquired read lock @%tr", new Date()));
+                    Thread.sleep((long)(10000 * Math.random()));
+                    readWriteLock.releaseLock();
+                    System.out.println(String.format(threadName + " release read lock @%tr", new Date()));
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            }
+        };
+
+        Runnable writeRunnable = new Runnable() {
+            public void run() {
+                try {
+                    ReadWriteLock readWriteLock = new ReadWriteLock();
+                    String threadName = Thread.currentThread().getName();
+                    System.out.println(String.format(threadName + " begins to acquire write lock @%tr", new Date()));
+                    readWriteLock.acquireWriteLock();
+                    System.out.println(String.format(threadName + " acquired write lock @%tr", new Date()));
+                    Thread.sleep((long)(10000 * Math.random()));
+                    readWriteLock.releaseLock();
+                    System.out.println(String.format(threadName + " release write lock @%tr", new Date()));
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            }
+        };
+
+        for (int i = 0; i < 10; i++) {
+            service.submit(i % 2 == 0 ? readRunnable : writeRunnable);
+            Thread.sleep(1000);
+        }
+
+        service.shutdown();
+        service.awaitTermination(10, TimeUnit.MINUTES);
     }
 }
 
