@@ -16,16 +16,16 @@ public class Barrier extends BaseConfiguration {
         final DistributedBarrier barrier = new DistributedBarrier(client, path);
         barrier.setBarrier();
 
-        ExecutorService service = Executors.newFixedThreadPool(10);
+        ExecutorService service = Executors.newFixedThreadPool(threadCount);
         Runnable runnable = new Runnable() {
             public void run() {
                 DistributedBarrier barrier = new DistributedBarrier(client, path);
                 try {
-                    Thread.sleep((long)(1000 * Math.random()));
+                    Thread.sleep((long)(5000 * Math.random()));
                     System.out.println(Thread.currentThread().getName() + " enter barrier");
                     barrier.waitOnBarrier();
                     System.out.println(Thread.currentThread().getName() + " leave barrier");
-                    Thread.sleep(2000);
+                    Thread.sleep(1000);
                 } catch (Exception ex) {
                     ex.printStackTrace();
                 }
@@ -34,6 +34,7 @@ public class Barrier extends BaseConfiguration {
         for (int i = 0; i < threadCount; ++i)
             service.submit(runnable);
 
+        Thread.sleep(100);
         System.out.println(Thread.currentThread().getName() + " is waiting...");
         Thread.sleep(10000);
         System.out.println(Thread.currentThread().getName() + " remove barrier");
