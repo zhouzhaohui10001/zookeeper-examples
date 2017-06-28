@@ -11,6 +11,9 @@ import java.util.List;
 import java.util.Random;
 
 public class Client extends BaseNamingService {
+    private List<String> providers = null;
+    private final Object condition = new Object();
+
     private final CuratorListener curatorListener = new CuratorListener() {
         public void eventReceived(CuratorFramework curatorFramework, CuratorEvent curatorEvent) throws Exception {
             if (curatorEvent
@@ -19,35 +22,39 @@ public class Client extends BaseNamingService {
                     .compareTo(
                             Watcher.Event.EventType.NodeChildrenChanged) == 0) {
                 System.out.println(curatorEvent);
-                init();
+                synchronized (condition) {
+                    getProviders();
+                }
             }
         }
     };
 
     private final ConnectionStateListener connectionStateListener = new ConnectionStateListener() {
         public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
+            System.out.println(connectionState);
             switch (connectionState) {
+                case CONNECTED:
                 case RECONNECTED:
-                    System.out.println(connectionState);
-                    init();
+                    synchronized (condition) {
+                        getProviders();
+                    }
                     break;
             }
         }
     };
-    private List<String> services = null;
 
     {
         client.start();
-        client.getCuratorListenable().addListener(curatorListener);
         client.getConnectionStateListenable().addListener(connectionStateListener);
-        init();
+        client.getCuratorListenable().addListener(curatorListener);
     }
 
-    private void init() {
+    private void getProviders() {
         try {
-            List<String> services = client.getChildren().watched().forPath("/" + namespace);
-            if (services != null && !services.isEmpty()) {
-                this.services = services;
+            List<String> providers = client.getChildren().watched().forPath("/" + namespace);
+            if (providers != null && !providers.isEmpty()) {
+                this.providers = providers;
+                condition.notifyAll();
             }
         } catch (Exception ex) {
             throw new RuntimeException(ex.getMessage());
@@ -55,19 +62,23 @@ public class Client extends BaseNamingService {
     }
 
     public void invoke() {
-        if (services == null || services.isEmpty()) {
-            throw new RuntimeException("there is no available services");
+        if (providers == null || providers.isEmpty()) {
+            throw new RuntimeException("there is no available providers");
         }
         Random random = new Random();
-        String service = services.get(random.nextInt(services.size()));
+        String service = providers.get(random.nextInt(providers.size()));
         System.out.println("invoke: " + service);
     }
 
     public static void main(String[] args) throws Throwable {
         Client client = new Client();
-        while (true) {
+        synchronized (client.condition) {
+            if (client.providers == null || client.providers.isEmpty())
+                client.condition.wait();
+        }
+        for (int i = 0; i <= 1000; i++) {
             client.invoke();
-            Thread.sleep(3000);
+            Thread.sleep(2000);
         }
     }
 }

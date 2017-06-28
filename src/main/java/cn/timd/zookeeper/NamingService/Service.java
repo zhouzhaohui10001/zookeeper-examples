@@ -6,20 +6,17 @@ import org.apache.curator.framework.state.ConnectionStateListener;
 import org.apache.zookeeper.CreateMode;
 
 public class Service extends BaseNamingService {
-    private final String url = "127.0.0.1:8889";
+    private final String url = "127.0.0.1:8887";
 
     private final ConnectionStateListener listener = new ConnectionStateListener() {
         public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
             System.out.println(connectionState);
-
+            System.out.println(Thread.currentThread().getName());
             switch (connectionState) {
                 case RECONNECTED:
-                    try {
-                        client.usingNamespace(namespace).delete().forPath(url);
-                    } catch (Exception ex) {
-                        ex.printStackTrace();
-                    }
-                    init();
+                    unregister();
+                case CONNECTED:
+                    register();
                     break;
             }
         }
@@ -28,10 +25,9 @@ public class Service extends BaseNamingService {
     {
         client.start();
         client.getConnectionStateListenable().addListener(listener);
-        init();
     }
 
-    private void init() {
+    private void register() {
         try {
             client.usingNamespace(namespace).create().withMode(CreateMode.EPHEMERAL).forPath(url);
         } catch (Exception ex) {
@@ -39,21 +35,29 @@ public class Service extends BaseNamingService {
         }
     }
 
-    private void work() {
+    private void unregister() {
+        try {
+            client.usingNamespace(namespace).delete().forPath("/" + url);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    private void work() throws InterruptedException {
         while (true) {
             System.out.println("I am working");
-
-            try {
-                Thread.sleep(3000);
-            } catch (InterruptedException ex) {
-                ex.printStackTrace();
-                break;
-            }
+            Thread.sleep(3000);
         }
     }
 
     public static void main(String[] args) {
-        new Service().work();
+        Service service = null;
+        try {
+            (service = new Service()).work();
+        } catch (InterruptedException ex) {
+            if (service != null)
+                service.unregister();
+        }
     }
 }
 
