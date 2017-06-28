@@ -19,13 +19,15 @@ public class LeaderElection extends BaseConfiguration {
     private final Object condition = new Object();
     private String nodeName;
 
-    private final CuratorListener listener = new CuratorListener() {
+    private final CuratorListener curatorListener = new CuratorListener() {
         public void eventReceived(CuratorFramework curatorFramework, CuratorEvent curatorEvent) throws Exception {
             if (curatorEvent
                     .getWatchedEvent()
                     .getType()
                     .compareTo(Watcher.Event.EventType.NodeDeleted) == 0)
-                judgeIsLeader();
+                synchronized (condition) {
+                    judgeIsLeader();
+                }
         }
     };
 
@@ -33,14 +35,17 @@ public class LeaderElection extends BaseConfiguration {
         public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
             System.out.println(connectionState);
             switch (connectionState) {
+                case CONNECTED:
                 case RECONNECTED:
-                    if (nodeName != null) {
-                        try {
-                            client.usingNamespace(namespace).delete().forPath("/" + nodeName);
-                        } catch (Throwable ex) {
-                            ex.printStackTrace();
-                        }
-                        init();
+                    synchronized (condition) {
+                        if (nodeName != null)
+                            try {
+                                client.usingNamespace(namespace).delete().forPath("/" + nodeName);
+                            } catch (Throwable ex) {
+                                ex.printStackTrace();
+                            }
+                        register();
+                        judgeIsLeader();
                     }
                     break;
                 case SUSPENDED:
@@ -49,21 +54,17 @@ public class LeaderElection extends BaseConfiguration {
                         isLeader = false;
                     }
                     break;
-                default:
-                    System.out.println(connectionState);
-                    break;
             }
         }
     };
 
     {
         client.start();
-        client.getCuratorListenable().addListener(listener);
+        client.getCuratorListenable().addListener(curatorListener);
         client.getConnectionStateListenable().addListener(connectionStateListener);
-        init();
     }
 
-    private void init() {
+    private void register() {
         try {
             nodeName = client.usingNamespace(namespace)
                     .create()
@@ -72,7 +73,6 @@ public class LeaderElection extends BaseConfiguration {
         } catch (Exception ex) {
             throw new RuntimeException(ex.getMessage());
         }
-        judgeIsLeader();
     }
 
     private void judgeIsLeader() {
@@ -120,16 +120,13 @@ public class LeaderElection extends BaseConfiguration {
         }
     }
 
-    private void realLogic() {
+    private void realLogic() throws InterruptedException {
         System.out.println("I am master ^_^");
-        try {
-            Thread.sleep(3000);
-        } catch (InterruptedException ex) {
-            ex.printStackTrace();
-        }
+        Thread.sleep(3000);
     }
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) throws Throwable {
         new LeaderElection().work();
     }
 }
+
